@@ -2,12 +2,10 @@ package com.brentvatne.exoplayer
 
 import android.content.Context
 import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.util.AttributeSet
 import android.view.View
 import android.view.View.MeasureSpec
 import android.widget.FrameLayout
-import android.widget.TextView
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
@@ -24,17 +22,6 @@ class ExoPlayerView @JvmOverloads constructor(context: Context, attrs: Attribute
 
     private var localStyle = SubtitleStyle()
     private var pendingResizeMode: Int? = null
-    private val liveBadge: TextView = TextView(context).apply {
-        text = "LIVE"
-        setTextColor(Color.WHITE)
-        textSize = 12f
-        val drawable = GradientDrawable()
-        drawable.setColor(Color.RED)
-        drawable.cornerRadius = 6f
-        background = drawable
-        setPadding(12, 4, 12, 4)
-        visibility = View.GONE
-    }
 
     private val playerView = PlayerView(context).apply {
         layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
@@ -56,11 +43,6 @@ class ExoPlayerView @JvmOverloads constructor(context: Context, attrs: Attribute
         // Add PlayerView with explicit layout parameters
         val playerViewLayoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         addView(playerView, playerViewLayoutParams)
-
-        // Add live badge with its own layout parameters
-        val liveBadgeLayoutParams = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT)
-        liveBadgeLayoutParams.setMargins(16, 16, 16, 16)
-        addView(liveBadge, liveBadgeLayoutParams)
     }
 
     fun setPlayer(player: ExoPlayer?) {
@@ -213,9 +195,6 @@ class ExoPlayerView @JvmOverloads constructor(context: Context, attrs: Attribute
         val player = playerView.player ?: return
         val isLive = player.isCurrentMediaItemLive
         val seekable = player.isCurrentMediaItemSeekable
-
-        // Show/hide badge
-        liveBadge.visibility = if (isLive) View.VISIBLE else View.GONE
 
         // Disable/enable scrubbing based on seekable
         val timeBar = playerView.findViewById<DefaultTimeBar?>(androidx.media3.ui.R.id.exo_progress)

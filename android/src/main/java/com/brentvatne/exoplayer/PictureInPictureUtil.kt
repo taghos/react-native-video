@@ -57,7 +57,7 @@ object PictureInPictureUtil {
 
         activity.addOnPictureInPictureModeChangedListener(onPictureInPictureModeChanged)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             activity.addOnUserLeaveHintListener(onUserLeaveHintCallback)
         }
 
@@ -105,7 +105,7 @@ object PictureInPictureUtil {
     @JvmStatic
     fun applyAutoEnterEnabled(context: ThemedReactContext, pipParamsBuilder: PictureInPictureParams.Builder?, autoEnterEnabled: Boolean) {
         if (pipParamsBuilder == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
-        pipParamsBuilder.setAutoEnterEnabled(autoEnterEnabled)
+        pipParamsBuilder.setAutoEnterEnabled(false)
         updatePictureInPictureActions(context, pipParamsBuilder.build())
     }
 

@@ -62,6 +62,7 @@ type AdConfigBase = Readonly<{
 export type AdConfigCSAI = AdConfigBase & Readonly<{
     type: 'csai';
     adTagUrl: string;
+    linearAdSlotSize?: 'container';
 }>;
 type AdConfigDAIBase = AdConfigBase & Readonly<{
     type: 'ssai';
@@ -69,6 +70,7 @@ type AdConfigDAIBase = AdConfigBase & Readonly<{
     format?: DaiFormat;
     adTagParameters?: Record<string, string>;
     fallbackUri?: string;
+    linearAdSlotSize?: 'container';
 }>;
 export type AdConfigDAIVod = AdConfigDAIBase & Readonly<{
     streamType: 'vod';

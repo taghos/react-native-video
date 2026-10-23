@@ -14,6 +14,8 @@
         private var streamManager: IMAStreamManager?
         /** Ad container view for DAI - stored to ensure proper z-ordering */
         private var daiAdContainerView: UIView?
+        /** spalla patch: CSAI ad container kept to gate touches to ad breaks */
+        private var csaiAdContainerView: UIView?
         /** Picture-in-Picture proxy for DAI - stored to ensure proper Picture-in-Picture support */
         private var pipProxy: IMAPictureInPictureProxy?
 
@@ -51,6 +53,10 @@
             // fixes RCTVideo --> RCTIMAAdsManager --> IMAAdsLoader --> IMAAdDisplayContainer --> RCTVideo memory leak.
             let adContainerView = UIView()
             adContainerView.backgroundColor = .clear
+            // spalla patch: transparent overlay must not eat player-control
+            // touches; interaction is enabled only while an ad break runs.
+            adContainerView.isUserInteractionEnabled = false
+            csaiAdContainerView = adContainerView
             _video.addSubview(adContainerView)
 
             // Enable Auto Layout to ensure the ad container resizes with the video view.
@@ -86,6 +92,8 @@
             // fixes RCTVideo --> RCTIMAAdsManager --> IMAAdsLoader --> IMAAdDisplayContainer --> RCTVideo memory leak.
             let adContainerView = UIView(frame: _video.bounds)
             adContainerView.backgroundColor = .clear
+            // spalla patch: see requestAds — touches only during ad breaks
+            adContainerView.isUserInteractionEnabled = false
             _video.addSubview(adContainerView)
             // Store reference for later z-ordering management. DAI requires ad container to stay on top for proper ad UI visibility
             daiAdContainerView = adContainerView
@@ -159,8 +167,13 @@
                 streamManager.destroy()
                 self.streamManager = nil
 
+                daiAdContainerView?.removeFromSuperview()
                 daiAdContainerView = nil
             }
+
+            // spalla patch: drop the stale CSAI touch-blocking layer
+            csaiAdContainerView?.removeFromSuperview()
+            csaiAdContainerView = nil
         }
 
         // MARK: - Getters
@@ -221,9 +234,23 @@
             }
 
             // DAI
-            if streamManager != nil {
+            // spalla patch: a stream-request LOAD failure never creates a
+            // streamManager, so gate recovery on the source being DAI (not on
+            // streamManager) — otherwise iOS hangs on a black screen with no
+            // error while Android already falls back. Surface the error to JS
+            // too, mirroring the Android DAI_REQUEST_ERROR path.
+            if _video.isDaiSource() {
                 _video.isSetSourceOngoing = false
                 _video.applyNextSource()
+
+                _video.onVideoError?([
+                    "error": [
+                        "code": "DAI_REQUEST_ERROR",
+                        "localizedDescription": adErrorData.adError.message ?? "DAI stream request failed",
+                        "domain": "RCTVideoIMA",
+                    ],
+                    "target": _video.reactTag as Any,
+                ])
 
                 // Handle DAI error by falling back to backup content if available
                 // This provides resilience when DAI stream fails or is unavailable
@@ -298,17 +325,20 @@
             }
 
             // Fall back to playing content
+            csaiAdContainerView?.isUserInteractionEnabled = false
             _video.setPaused(false)
         }
 
         func adsManagerDidRequestContentPause(_: IMAAdsManager) {
             // Pause the content for the SDK to play ads.
+            csaiAdContainerView?.isUserInteractionEnabled = true
             _video?.setPaused(true)
             _video?.setAdPlaying(true)
         }
 
         func adsManagerDidRequestContentResume(_: IMAAdsManager) {
             // Resume the content since the SDK is done playing ads (at least for now).
+            csaiAdContainerView?.isUserInteractionEnabled = false
             _video?.setAdPlaying(false)
             _video?.setPaused(false)
         }
@@ -317,6 +347,16 @@
 
         func streamManager(_: IMAStreamManager, didReceive event: IMAAdEvent) {
             guard let _video else { return }
+
+            // spalla patch: DAI overlay only grabs touches during ad breaks
+            switch event.type {
+            case .AD_BREAK_STARTED:
+                daiAdContainerView?.isUserInteractionEnabled = true
+            case .AD_BREAK_ENDED, .ALL_ADS_COMPLETED:
+                daiAdContainerView?.isUserInteractionEnabled = false
+            default:
+                break
+            }
 
             if _video.onReceiveAdEvent != nil {
                 let type = convertEventToString(event: event.type)

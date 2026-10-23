@@ -88,6 +88,7 @@ export type AdConfigCSAI = AdConfigBase &
   Readonly<{
     type: 'csai';
     adTagUrl: string;
+    linearAdSlotSize?: 'container';
   }>;
 
 type AdConfigDAIBase = AdConfigBase &
@@ -97,6 +98,7 @@ type AdConfigDAIBase = AdConfigBase &
     format?: DaiFormat;
     adTagParameters?: Record<string, string>;
     fallbackUri?: string;
+    linearAdSlotSize?: 'container';
   }>;
 
 export type AdConfigDAIVod = AdConfigDAIBase &

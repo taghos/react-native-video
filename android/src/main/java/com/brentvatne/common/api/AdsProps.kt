@@ -17,6 +17,7 @@ class AdsProps {
     var format: String? = null
     var adTagParameters: Map<String, String>? = null
     var fallbackUri: String? = null
+    var linearAdSlotSize: String? = null
 
     fun isCSAI(): Boolean = type == "csai" && adTagUrl != null
     fun isDAI(): Boolean = type == "ssai"
@@ -35,13 +36,14 @@ class AdsProps {
                 assetKey == other.assetKey &&
                 format == other.format &&
                 adTagParameters == other.adTagParameters &&
-                fallbackUri == other.fallbackUri
+                fallbackUri == other.fallbackUri &&
+                linearAdSlotSize == other.linearAdSlotSize
             )
     }
 
     override fun hashCode(): Int =
         Objects.hash(
-            type, streamType, adTagUrl, adLanguage, contentSourceId, videoId, assetKey, format, adTagParameters, fallbackUri
+            type, streamType, adTagUrl, adLanguage, contentSourceId, videoId, assetKey, format, adTagParameters, fallbackUri, linearAdSlotSize
         )
 
     companion object {
@@ -55,6 +57,7 @@ class AdsProps {
         private const val PROP_FORMAT = "format"
         private const val PROP_AD_TAG_PARAMETERS = "adTagParameters"
         private const val PROP_FALLBACK_URI = "fallbackUri"
+        private const val PROP_LINEAR_AD_SLOT_SIZE = "linearAdSlotSize"
 
         @JvmStatic
         fun parse(src: ReadableMap?): AdsProps {
@@ -78,6 +81,7 @@ class AdsProps {
                 adsProps.assetKey = ReactBridgeUtils.safeGetString(src, PROP_ASSET_KEY)
                 adsProps.format = ReactBridgeUtils.safeGetString(src, PROP_FORMAT)
                 adsProps.fallbackUri = ReactBridgeUtils.safeGetString(src, PROP_FALLBACK_URI)
+                adsProps.linearAdSlotSize = ReactBridgeUtils.safeGetString(src, PROP_LINEAR_AD_SLOT_SIZE)
 
                 if (src.hasKey(PROP_AD_TAG_PARAMETERS)) {
                     val adTagParamsMap = src.getMap(PROP_AD_TAG_PARAMETERS)

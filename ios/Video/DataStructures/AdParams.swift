@@ -9,6 +9,7 @@ public struct AdParams {
     let format: String?
     let adTagParameters: [String: String]?
     let fallbackUri: String?
+    let linearAdSlotSize: String?
 
     let json: NSDictionary?
 
@@ -41,6 +42,7 @@ public struct AdParams {
             format = nil
             adTagParameters = nil
             fallbackUri = nil
+            linearAdSlotSize = nil
             return
         }
         self.json = json
@@ -53,6 +55,7 @@ public struct AdParams {
         assetKey = json["assetKey"] as? String
         format = json["format"] as? String
         fallbackUri = json["fallbackUri"] as? String
+        linearAdSlotSize = json["linearAdSlotSize"] as? String
 
         if let adTagParamsDict = json["adTagParameters"] as? [String: String] {
             adTagParameters = adTagParamsDict

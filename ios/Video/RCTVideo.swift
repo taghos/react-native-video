@@ -102,6 +102,10 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
 
     private var _pip: RCTPictureInPicture?
     private var _isPictureInPictureActive = false
+    private var _isTransitioningToBackground = false
+    private var _wasPlayingBeforePictureInPicture = false
+    private var _nativePictureInPictureTransitioning = false
+    private var _pictureInPictureTransitionGeneration = 0
 
     // Events
     @objc var onVideoLoadStart: RCTDirectEventBlock?
@@ -135,6 +139,7 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
 
     @objc
     func _onPictureInPictureEnter() {
+        handlePictureInPictureWillEnter()
         handlePictureInPictureEnter()
     }
 
@@ -143,15 +148,38 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
         handlePictureInPictureExit()
     }
 
+    private func armPictureInPictureTransition() {
+        _pictureInPictureTransitionGeneration += 1
+        let generation = _pictureInPictureTransitionGeneration
+        _isTransitioningToBackground = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self, self._pictureInPictureTransitionGeneration == generation else { return }
+            self._isTransitioningToBackground = false
+        }
+    }
+
+    func handlePictureInPictureWillEnter() {
+        _nativePictureInPictureTransitioning = true
+        _wasPlayingBeforePictureInPicture = !_paused && (_isPlaying || (_player?.rate ?? 0) > 0)
+        armPictureInPictureTransition()
+    }
+
     func handlePictureInPictureEnter() {
+        _nativePictureInPictureTransitioning = false
         _isPictureInPictureActive = true
+        if _wasPlayingBeforePictureInPicture {
+            _paused = false
+            _player?.play()
+            _player?.rate = _rate
+        }
         onPictureInPictureStatusChanged?(["isActive": NSNumber(value: true)])
     }
 
     func handlePictureInPictureExit() {
+        _nativePictureInPictureTransitioning = false
         _isPictureInPictureActive = false
+        _wasPlayingBeforePictureInPicture = false
         onPictureInPictureStatusChanged?(["isActive": NSNumber(value: false)])
-
         // To continue audio playback in backgroud we need to set
         // player in _playerLayer & _playerViewController to nil
         let appState = UIApplication.shared.applicationState
@@ -340,8 +368,14 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
 
     @objc
     func applicationWillResignActive(notification _: NSNotification!) {
+        if _enterPictureInPictureOnLeave || isPictureInPictureActive() {
+            armPictureInPictureTransition()
+        }
+        if _enterPictureInPictureOnLeave && !_nativePictureInPictureTransitioning && !isPictureInPictureActive() && !_paused && _isPlaying {
+            enterPictureInPicture()
+        }
         let isExternalPlaybackActive = getIsExternalPlaybackActive()
-        if _playInBackground || _playWhenInactive || !_isPlaying || isExternalPlaybackActive { return }
+        if _playInBackground || _playWhenInactive || _isTransitioningToBackground || isPictureInPictureActive() || !_isPlaying || isExternalPlaybackActive { return }
 
         _player?.pause()
         _player?.rate = 0.0
@@ -349,6 +383,13 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
 
     @objc
     func applicationDidBecomeActive(notification _: NSNotification!) {
+        if !isPictureInPictureActive() {
+            _isTransitioningToBackground = false
+        }
+        if !_paused {
+            _player?.play()
+            _player?.rate = _rate
+        }
         let isExternalPlaybackActive = getIsExternalPlaybackActive()
         if _playInBackground || _playWhenInactive || !_isPlaying || isExternalPlaybackActive { return }
 
@@ -1198,6 +1239,7 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
     func createPlayerViewController(player: AVPlayer) -> RCTVideoPlayerViewController {
         let viewController = RCTVideoPlayerViewController()
         viewController.showsPlaybackControls = self._controls
+        viewController.allowsPictureInPicturePlayback = false
         #if !os(tvOS)
             viewController.updatesNowPlayingInfoCenter = false
         #endif
@@ -1206,7 +1248,6 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
 
         viewController.view.frame = self.bounds
         viewController.player = player
-
         // Set the initial playback speed in controls to match playback rate
         if #available(iOS 16.0, tvOS 16.0, *) {
             if let initialSpeed = viewController.speeds.first(where: { $0.rate == _rate }) {
@@ -1357,7 +1398,36 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
     }
 
     func getAdTagUrl() -> String? {
-        return _source?.adParams.adTagUrl
+        guard let adTagUrl = _source?.adParams.adTagUrl,
+              _source?.adParams.linearAdSlotSize == "container" else {
+            return _source?.adParams.adTagUrl
+        }
+        let scale = window?.screen.scale ?? traitCollection.displayScale
+        let width = Int(bounds.width * scale)
+        let height = Int(bounds.height * scale)
+        guard width > 0 && height > 0 else { return adTagUrl }
+
+        let dataPrefix = "data:application/xml;base64,"
+        if adTagUrl.hasPrefix(dataPrefix) {
+            guard let data = Data(base64Encoded: String(adTagUrl.dropFirst(dataPrefix.count))),
+                  let xml = String(data: data, encoding: .utf8) else { return adTagUrl }
+            let sizedXml = xml
+                .replacingOccurrences(of: "__SPALLA_SLOT_WIDTH__", with: String(width))
+                .replacingOccurrences(of: "__SPALLA_SLOT_HEIGHT__", with: String(height))
+            guard sizedXml != xml,
+                  let sizedData = sizedXml.data(using: .utf8) else { return adTagUrl }
+            return dataPrefix + sizedData.base64EncodedString()
+        }
+
+        guard var components = URLComponents(string: adTagUrl) else { return adTagUrl }
+        var queryItems = components.queryItems ?? []
+        queryItems.removeAll {
+            $0.name == "linearAdSlotWidth" || $0.name == "linearAdSlotHeight"
+        }
+        queryItems.append(URLQueryItem(name: "linearAdSlotWidth", value: String(width)))
+        queryItems.append(URLQueryItem(name: "linearAdSlotHeight", value: String(height)))
+        components.queryItems = queryItems
+        return components.string ?? adTagUrl
     }
 
     func getPip() -> RCTPictureInPicture? {
@@ -1663,9 +1733,15 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
         }
         let isPlaying = player.timeControlStatus == .playing
 
+        if !isPlaying && _isTransitioningToBackground && !_paused {
+            _player?.play()
+            _player?.rate = _rate
+            return
+        }
+
         guard _isPlaying != isPlaying else { return }
         _isPlaying = isPlaying
-        if _controls {
+        if _controls && !_isTransitioningToBackground && !isPictureInPictureActive() {
             _paused = !isPlaying
         }
         onVideoPlaybackStateChanged?(["isPlaying": isPlaying, "isSeeking": self._pendingSeek == true, "target": reactTag as Any])
@@ -1713,6 +1789,9 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
     }
 
     func handleViewControllerOverlayViewFrameChange(overlayView _: UIView, change: NSKeyValueObservedChange<CGRect>) {
+        // spalla patch: only meaningful in fullscreen; inline it fights
+        // react-native-screens' safe-area layout in an infinite loop.
+        guard _fullscreenPlayerPresented else { return }
         let oldRect = change.oldValue
         let newRect = change.newValue
 
@@ -1926,7 +2005,17 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
         }
 
         func getAdTagParameters() -> [String: String]? {
-            return _source?.adParams.adTagParameters
+            var parameters = _source?.adParams.adTagParameters ?? [:]
+            if _source?.adParams.linearAdSlotSize == "container" {
+                let scale = window?.screen.scale ?? traitCollection.displayScale
+                let width = Int(bounds.width * scale)
+                let height = Int(bounds.height * scale)
+                if width > 0 && height > 0 {
+                    parameters["linearAdSlotWidth"] = String(width)
+                    parameters["linearAdSlotHeight"] = String(height)
+                }
+            }
+            return parameters.isEmpty ? nil : parameters
         }
 
         func getBackupStreamUri() -> String? {
