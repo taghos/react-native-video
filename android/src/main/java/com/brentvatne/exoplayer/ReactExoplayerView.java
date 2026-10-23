@@ -650,6 +650,11 @@ public class ReactExoplayerView extends FrameLayout implements
                     // Two-phase ads (CSAI pre-roll then DAI) reuse the view: without
                     // rebuilding the player the DAI ads loader is never created.
                     releasePlayer();
+                    // The DAI timeline (stitched pods, its own live window) shares
+                    // nothing with the content timeline: releasePlayer() just saved
+                    // its position, which would resume the next source at the DAI
+                    // position — a live fallback lands far behind the CDN window.
+                    clearResumePosition();
                 }
 
                 if (player == null) {
