@@ -334,6 +334,7 @@
             csaiAdContainerView?.isUserInteractionEnabled = true
             _video?.setPaused(true)
             _video?.setAdPlaying(true)
+            emitContentEvent("CONTENT_PAUSE_REQUESTED")
         }
 
         func adsManagerDidRequestContentResume(_: IMAAdsManager) {
@@ -341,6 +342,19 @@
             csaiAdContainerView?.isUserInteractionEnabled = false
             _video?.setAdPlaying(false)
             _video?.setPaused(false)
+            emitContentEvent("CONTENT_RESUME_REQUESTED")
+        }
+
+        // spalla patch: iOS IMA reports content pause/resume only through these
+        // delegate callbacks, never as IMAAdEvents (Android emits both). With a
+        // VMAP, ALL_ADS_COMPLETED only arrives after the last break, so JS never
+        // learned that the pre-roll had ended.
+        private func emitContentEvent(_ type: String) {
+            guard let _video, _video.onReceiveAdEvent != nil else { return }
+            _video.onReceiveAdEvent?([
+                "event": type,
+                "target": _video.reactTag!,
+            ])
         }
 
         // MARK: - IMAStreamManagerDelegate
