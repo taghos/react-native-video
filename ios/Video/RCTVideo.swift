@@ -92,6 +92,9 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
     #endif
     private var _didRequestAds = false
     private var _adPlaying = false
+    // spalla patch: an ad pause requested through the paused prop, as opposed
+    // to IMA's own pause when the app resigns active.
+    private var _adPausedByApp = false
 
     private lazy var _drmManager: DRMManagerSpec? = ReactNativeVideoManager.shared.getDRMManager()
     private var _playerObserver: RCTPlayerObserver = .init()
@@ -390,6 +393,13 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
             _player?.play()
             _player?.rate = _rate
         }
+        #if USE_GOOGLE_IMA
+            // spalla patch: IMA pauses a CSAI ad when the app resigns active
+            // (Notification/Control Center, app switcher) and never resumes it.
+            if _adPlaying && !_adPausedByApp {
+                _imaAdsManager?.getAdsManager()?.resume()
+            }
+        #endif
         let isExternalPlaybackActive = getIsExternalPlaybackActive()
         if _playInBackground || _playWhenInactive || !_isPlaying || isExternalPlaybackActive { return }
 
@@ -896,6 +906,7 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
     func setPaused(_ paused: Bool) {
         if paused {
             if _adPlaying {
+                _adPausedByApp = true
                 #if USE_GOOGLE_IMA
                     _imaAdsManager.getAdsManager()?.pause()
                 #endif
@@ -905,6 +916,7 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
             }
         } else {
             if _adPlaying {
+                _adPausedByApp = false
                 #if USE_GOOGLE_IMA
                     _imaAdsManager.getAdsManager()?.resume()
                 #endif
@@ -921,6 +933,14 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
 
         _paused = paused
         AudioSessionManager.shared.playerPropertiesChanged(view: self)
+    }
+
+    // spalla patch: mid-ad, _paused holds IMA's content pause, and re-applying
+    // it (applyModifiers on foreground or readyToPlay, seek completion) would
+    // reach the ads manager and pause an ad nobody asked to pause.
+    private func reapplyPaused() {
+        if _adPlaying { return }
+        setPaused(_paused)
     }
 
     @objc
@@ -944,7 +964,7 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
             guard let self else { return }
 
             self._playerObserver.addTimeObserverIfNotSet()
-            self.setPaused(self._paused)
+            self.reapplyPaused()
             self.onVideoSeek?(["currentTime": NSNumber(value: Float(CMTimeGetSeconds(item.currentTime()))),
                                "seekTime": time,
                                "target": self.reactTag as Any])
@@ -1066,7 +1086,7 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
         setResizeMode(_resizeMode)
         setRepeat(_repeat)
         setControls(_controls)
-        setPaused(_paused)
+        reapplyPaused()
         setAllowsExternalPlayback(_allowsExternalPlayback)
 
         AudioSessionManager.shared.playerPropertiesChanged(view: self)
@@ -1448,6 +1468,7 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
     #endif
     func setAdPlaying(_ adPlaying: Bool) {
         _adPlaying = adPlaying
+        _adPausedByApp = false
     }
 
     // MARK: - React View Management
