@@ -160,6 +160,8 @@
                 adsManager.volume = 0
                 adsManager.pause()
                 adsManager.destroy()
+                // spalla patch: removeFromSuperview and deinit both release.
+                self.adsManager = nil
             }
 
             // DAI

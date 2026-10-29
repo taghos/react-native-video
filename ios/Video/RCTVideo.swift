@@ -1522,6 +1522,14 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
     // MARK: - Lifecycle
 
     override func removeFromSuperview() {
+        #if USE_GOOGLE_IMA
+            // spalla patch: deinit is not guaranteed to follow the unmount, and
+            // the CSAI ad plays on IMA's own player, which the AVPlayer teardown
+            // below does not stop: leaving the screen mid-ad kept its audio on.
+            _imaAdsManager?.releaseAds()
+            _adPlaying = false
+            _adPausedByApp = false
+        #endif
         self._player?.replaceCurrentItem(with: nil)
         if let player = _player {
             player.pause()
