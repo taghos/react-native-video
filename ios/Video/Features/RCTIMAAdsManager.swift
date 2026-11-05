@@ -29,6 +29,16 @@
         func setUpAdsLoader() {
             guard let _video else { return }
             let settings = IMASettings()
+            // spalla patch: mirror setupDaiLoader. With PiP active the app
+            // process and its audio session stay alive in background, and with
+            // the default (NO) IMA treats the backgrounding as an abandoned
+            // break: it fires CONTENT_RESUME_REQUESTED (content resumes into
+            // the PiP window while the break is still due), replays the pod
+            // from the start on return, and the creative's audio can keep
+            // going in background. The view now pauses/resumes the ad itself
+            // on resign/become-active (see RCTVideo), so IMA must leave the
+            // pod state alone while the app is backgrounded.
+            settings.enableBackgroundPlayback = _video.shouldEnableBackgroundPlayback()
             if let adLanguage = _video.getAdLanguage() {
                 settings.language = adLanguage
             }

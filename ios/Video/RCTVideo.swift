@@ -219,6 +219,9 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
 
             if _playerLayer != nil && !_controls && _pip?._pipController == nil {
                 _pip?.setupPipController(_playerLayer)
+                // spalla patch: an ad may already be playing when the
+                // controller is (re)created — keep its auto-start suppressed
+                updatePipAutoStart()
             }
         #else
             DebugLog("Picture in Picture is not supported on this platform")
@@ -377,6 +380,19 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
         if _enterPictureInPictureOnLeave && !_nativePictureInPictureTransitioning && !isPictureInPictureActive() && !_paused && _isPlaying {
             enterPictureInPicture()
         }
+        #if USE_GOOGLE_IMA
+            // spalla patch: the CSAI creative plays on IMA's own player, which
+            // the content pause below never touches — with PiP active the app
+            // and its audio session stay alive in background and the ad kept
+            // playing there. IMA's own resign-active pause is not reliable in
+            // that path, so pause the pod directly; applicationDidBecomeActive
+            // resumes it (that resume keys on !_adPausedByApp, so this must
+            // not go through setPaused). Same respect for the background-audio
+            // props as the content pause below.
+            if _adPlaying && !_playInBackground && !_playWhenInactive {
+                _imaAdsManager?.getAdsManager()?.pause()
+            }
+        #endif
         let isExternalPlaybackActive = getIsExternalPlaybackActive()
         if _playInBackground || _playWhenInactive || _isTransitioningToBackground || isPictureInPictureActive() || !_isPlaying || isExternalPlaybackActive { return }
 
@@ -1469,6 +1485,18 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
     func setAdPlaying(_ adPlaying: Bool) {
         _adPlaying = adPlaying
         _adPausedByApp = false
+        updatePipAutoStart()
+    }
+
+    // spalla patch: a CSAI creative renders on IMA's own player, never on the
+    // pip'd content layer, so the system auto-PiP (canStartPictureInPicture
+    // AutomaticallyFromInline) would only open a window showing the frozen
+    // content while a break runs. Keep it off for the duration of the ad; a
+    // manual start (PiP button) still works.
+    private func updatePipAutoStart() {
+        #if os(iOS)
+            _pip?._pipController?.canStartPictureInPictureAutomaticallyFromInline = !_adPlaying
+        #endif
     }
 
     // MARK: - React View Management
