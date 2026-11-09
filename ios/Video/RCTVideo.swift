@@ -170,7 +170,14 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
     func handlePictureInPictureEnter() {
         _nativePictureInPictureTransitioning = false
         _isPictureInPictureActive = true
-        if _wasPlayingBeforePictureInPicture {
+        // spalla patch: a CSAI pod can start while the PiP transition runs
+        // (LOADED lands after resign-active, before didStart). The flag below
+        // was captured before the break; honoring it resumes the content
+        // player mid-break — content video in the PiP window over the
+        // creative's background audio, and content audio under the ad when
+        // the user expands back. IMA's content pause must survive the
+        // transition; didBecomeActive's resume keys on _paused anyway.
+        if _wasPlayingBeforePictureInPicture && !_adPlaying {
             _paused = false
             _player?.play()
             _player?.rate = _rate
@@ -183,6 +190,13 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
         _isPictureInPictureActive = false
         _wasPlayingBeforePictureInPicture = false
         onPictureInPictureStatusChanged?(["isActive": NSNumber(value: false)])
+        // spalla patch: a pod LOADEDed while PiP was active was deferred, not
+        // dropped — play it now that the window is gone (expand). The
+        // didBecomeActive call below covers the reopen path; the pending flag
+        // makes both idempotent.
+        #if USE_GOOGLE_IMA
+            _imaAdsManager?.startPendingPodIfDue()
+        #endif
         // To continue audio playback in backgroud we need to set
         // player in _playerLayer & _playerViewController to nil
         let appState = UIApplication.shared.applicationState
@@ -415,6 +429,10 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
             if _adPlaying && !_adPausedByApp {
                 _imaAdsManager?.getAdsManager()?.resume()
             }
+            // spalla patch: a pod deferred while PiP was active (LOADED after
+            // didStart) plays now — expand that skipped the exit hook, or the
+            // app being reopened after a background X-dismiss.
+            _imaAdsManager?.startPendingPodIfDue()
         #endif
         let isExternalPlaybackActive = getIsExternalPlaybackActive()
         if _playInBackground || _playWhenInactive || !_isPlaying || isExternalPlaybackActive { return }
@@ -1476,6 +1494,17 @@ class RCTVideo: UIView, RCTVideoPlayerViewControllerDelegate, RCTPlayerObserverH
     func shouldEnableBackgroundPlayback() -> Bool {
         return _playInBackground || _enterPictureInPictureOnLeave
     }
+
+    #if USE_GOOGLE_IMA
+        /// spalla patch: prop rule shared by the resign-active pod pause and
+        /// the pod-started-while-inactive pause in the LOADED path — a pod
+        /// that starts mid-PiP-transition lands after resign-active, so the
+        /// resign pause never sees it and the creative would play in
+        /// background. Same respect for playInBackground/playWhenInactive.
+        func shouldPauseAdWhenAppInactive() -> Bool {
+            return !_playInBackground && !_playWhenInactive
+        }
+    #endif
 
     #if USE_GOOGLE_IMA
         func getContentPlayhead() -> IMAAVPlayerContentPlayhead? {

@@ -1,10 +1,15 @@
 #if USE_GOOGLE_IMA
     import Foundation
     import GoogleInteractiveMediaAds
+    import UIKit
 
     class RCTIMAAdsManager: NSObject, IMAAdsLoaderDelegate, IMAAdsManagerDelegate, IMALinkOpenerDelegate, IMAStreamManagerDelegate {
         private weak var _video: RCTVideo?
         private var _isPictureInPictureActive: () -> Bool
+        /** spalla patch: a CSAI pod LOADEDed while PiP was active is deferred,
+            not dropped — startPendingPodIfDue() plays it when the window is
+            gone so the pre-roll keeps its impression. */
+        private var _hasPendingPodStart = false
 
         /** Entry point for the SDK. Used to make ad requests. */
         private var adsLoader: IMAAdsLoader!
@@ -162,6 +167,10 @@
         }
 
         func releaseAds() {
+            // spalla patch: the pending pod belongs to the manager being torn
+            // down — never leak the deferral into a freshly created one.
+            _hasPendingPodStart = false
+
             // CSAI
             if let adsManager {
                 // Destroy AdsManager may be delayed for a few milliseconds
@@ -196,6 +205,21 @@
 
         func getAdsManager() -> IMAAdsManager? {
             return adsManager
+        }
+
+        // spalla patch: plays a pod deferred by the PiP-active LOADED gate.
+        // Called from both the PiP exit (expand) and didBecomeActive (app
+        // reopened after a background X-dismiss) — whichever fires first
+        // wins, the pending flag makes the pair idempotent. CSAI only: DAI
+        // has no adsManager.
+        func startPendingPodIfDue() {
+            guard _hasPendingPodStart, let adsManager else { return }
+            guard !_isPictureInPictureActive() else { return }
+            // X-dismissing the window in background must not kick a creative
+            // off with audio only; wait for the app to be foreground again.
+            guard UIApplication.shared.applicationState != .background else { return }
+            _hasPendingPodStart = false
+            adsManager.start()
         }
 
         // MARK: - IMAAdsLoaderDelegate
@@ -293,10 +317,25 @@
             }
             // Play each ad once it has been loaded
             if event.type == IMAAdEventType.LOADED {
+                // spalla patch: a pod that LOADEDs with the PiP window up is
+                // deferred to startPendingPodIfDue() (PiP exit / become
+                // active) — the early return before also skipped the emit,
+                // so JS never saw the break and the pre-roll was lost.
                 if _isPictureInPictureActive() {
+                    _hasPendingPodStart = true
                     return
                 }
                 adsManager.start()
+                // spalla patch: start() can land mid-PiP-transition, i.e.
+                // after resign-active — the resign pause only sees pods
+                // already playing then, and this one would run its creative
+                // in background under the PiP window. Apply the same prop
+                // rule; didBecomeActive's resume (keys on !_adPausedByApp)
+                // brings it back when the user returns.
+                if UIApplication.shared.applicationState != .active,
+                   _video.shouldPauseAdWhenAppInactive() {
+                    adsManager.pause()
+                }
             }
 
             if _video.onReceiveAdEvent != nil {
